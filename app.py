@@ -45,8 +45,10 @@ def get_plasma_list(client):
         'state': y['state'],
         'id': str(x),
         'oid': x} for x,y in client.list().items()]
-    return pd.DataFrame(plasma_items).sort_values(['create_time', 'id'], ascending=False)
-
+    if len(plasma_items)>0:
+        return pd.DataFrame(plasma_items).sort_values(['create_time', 'id'], ascending=False)
+    else:
+        return pd.DataFrame(columns=[x['name'] for x in plasma_list_display_cols()])
 
 app.layout = dbc.Container(
     [
@@ -157,7 +159,9 @@ def interval_update_plasma_state(n_intervals, socket_val, current_id, num_listin
         if num_listing_rows != list_t.shape[0] and list_t.shape[0]>0:
             selected_row_ids=[list_t.id.tolist()[0]]
             selected_rows=[0]
-        return list_t.drop(columns=['oid']).to_dict('records'),m,c,list_t.shape[0],selected_row_ids,selected_rows
+        if list_t.shape[0]>0:
+            list_t = list_t.drop(columns=['oid'])
+        return list_t.to_dict('records'),m,c,list_t.shape[0],selected_row_ids,selected_rows
     else:
         return [],m,c,0,selected_row_ids,selected_rows
 
