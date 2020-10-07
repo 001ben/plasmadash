@@ -13,13 +13,20 @@ import plotly.express as px
 import pandas as pd
 import pyarrow as pa
 from pyarrow import plasma
+from functools import lru_cache
 
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], title='Plasma', update_title=None)
 
-def get_plasma(conn_str):
+@lru_cache()
+def get_plasma(conn_str, clicks):
+    return plasma.connect(conn_str, 1)
+
+def get_plasma_catch(conn_str, clicks):
     try:
-        return plasma.connect(conn_str, 1)
+        client=get_plasma(conn_str, clicks)
+        client.list()
+        return client
     except:
         return None
 
@@ -53,6 +60,7 @@ def get_plasma_list(client):
 app.layout = dbc.Container(
     [
         dcc.Store(id='socket-val', data='/tmp/plasma'),
+        dcc.Store(id='socket-connect-clicks', data=0),
         dcc.Store(id='previous-id'),
         dcc.Store(id='current-id'),
         dcc.Store(id='num_listing_rows', data=0),
@@ -116,7 +124,7 @@ app.layout = dbc.Container(
         ]),
         dcc.Interval(
             id='update-plasma-state',
-            interval=1*3000,
+            interval=1*2000,
             n_intervals=0
         ),
     ],
@@ -127,12 +135,13 @@ app.layout = dbc.Container(
     [
         Output('socket-val', 'data'),
         Output('update-plasma-state', 'n_intervals'),
+        Output('socket-connect-clicks', 'data'),
     ],
     [Input('plasma-connect', 'n_clicks')],
     [State('plasma-socket', 'value'), State('update-plasma-state', 'n_intervals')]
 )
 def update_connection_status(n_clicks, new_socket_val, n_intervals):
-    return new_socket_val, n_intervals+1
+    return new_socket_val, n_intervals+1, n_clicks
 
 @app.callback(
     [
@@ -143,15 +152,15 @@ def update_connection_status(n_clicks, new_socket_val, n_intervals):
         Output('plasma-listing', 'selected_row_ids'),
         Output('plasma-listing', 'selected_rows'),
     ],
-    [Input('update-plasma-state', 'n_intervals')],
+    [Input('update-plasma-state', 'n_intervals'), Input('socket-connect-clicks', 'data')],
     [State('socket-val', 'data'),
         State('current-id', 'data'),
         State('num_listing_rows', 'data'),
         State('plasma-listing', 'selected_row_ids'),
-        State('plasma-listing', 'selected_rows'),]
+        State('plasma-listing', 'selected_rows')]
 )
-def interval_update_plasma_state(n_intervals, socket_val, current_id, num_listing_rows, selected_row_ids, selected_rows):
-    client = get_plasma(socket_val)
+def interval_update_plasma_state(n_intervals, connect_clicks, socket_val, current_id, num_listing_rows, selected_row_ids, selected_rows):
+    client = get_plasma_catch(socket_val, connect_clicks)
     m,c = connected_alert(client, socket_val)
     if client is not None:
         list_t = get_plasma_list(client)
@@ -173,7 +182,7 @@ def interval_update_plasma_state(n_intervals, socket_val, current_id, num_listin
         Input('num_listing_rows', 'data')],
     [State('current-id', 'data')]
 )
-def interval_update_plasma_state(selected_row_ids, data, num_listing_rows, current_id):
+def update_plasma_selected_data(selected_row_ids, data, num_listing_rows, current_id):
     new_id = selected_row_ids[0] if selected_row_ids is not None else None
     if new_id is None or new_id == current_id:
         raise dash.exceptions.PreventUpdate
@@ -191,14 +200,14 @@ def interval_update_plasma_state(selected_row_ids, data, num_listing_rows, curre
         Output('color-col', 'value'),
     ],
     [Input('current-id', 'data')],
-    [State('previous-id', 'data'), State('socket-val', 'data')]
+    [State('previous-id', 'data'), State('socket-val', 'data'), State('socket-connect-clicks', 'data')]
 )
-def update_selected_id(selected_row_ids, previous_id, socket_val):
+def update_selected_id(selected_row_ids, previous_id, socket_val, connect_clicks):
     if selected_row_ids is not None:
         if (previous_id is not None and selected_row_ids==previous_id):
             raise dash.exceptions.PreventUpdate
         
-        client=get_plasma(socket_val)
+        client=get_plasma_catch(socket_val, connect_clicks)
         if client is not None:
             listing = get_plasma_list(client)
             selected_id = listing[listing.id == selected_row_ids].oid
@@ -216,11 +225,11 @@ def update_selected_id(selected_row_ids, previous_id, socket_val):
         Input('x-col', 'value'),
         Input('y-col', 'value'),
         Input('color-col', 'value')],
-    [State('socket-val', 'data')]
+    [State('socket-val', 'data'), State('socket-connect-clicks', 'data')]
 )
-def update_explore_graph(selected_row_ids, x_col, y_col, color_col, socket_val):
+def update_explore_graph(selected_row_ids, x_col, y_col, color_col, socket_val, connect_clicks):
     if selected_row_ids is not None:
-        client=get_plasma(socket_val)
+        client=get_plasma_catch(socket_val, connect_clicks)
         if client is not None:
             listing = get_plasma_list(client)
             selected_id = listing[listing.id == selected_row_ids].oid
